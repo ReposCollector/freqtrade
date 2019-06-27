@@ -170,8 +170,9 @@ class Configuration(object):
         self._load_logging_config(config)
 
         # Support for sd_notify
-        if self.args.sd_notify:
-            config['internals'].update({'sd_notify': True})
+        #if self.args.sd_notify:
+        #    config['internals'].update({'sd_notify': True})
+        config['internals'].update({'sd_notify': False})
 
         # Add dynamic_whitelist if found
         if 'dynamic_whitelist' in self.args and self.args.dynamic_whitelist:

@@ -77,7 +77,10 @@ def analyse_and_plot_pairs(config: Dict[str, Any]):
         pairs = config["exchange"]["pair_whitelist"]
 
     # Set timerange to use
-    timerange = Arguments.parse_timerange(config["timerange"])
+    if 'timerange' in config:
+        timerange = Arguments.parse_timerange(config["timerange"])
+    else:
+        timerange = None
     ticker_interval = strategy.ticker_interval
 
     tickers = history.load_data(

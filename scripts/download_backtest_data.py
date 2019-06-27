@@ -54,7 +54,7 @@ if args.config:
     if config.get('ticker_interval'):
         timeframes = args.timeframes or [config.get('ticker_interval')]
     else:
-        timeframes = args.timeframes or ['1m', '5m']
+        timeframes = args.timeframes or ['1m', '5m', '15m', '1h', '4h', '6h', '12h']
 
 else:
     config = {
