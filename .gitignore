@@ -6,7 +6,7 @@ config*.json
 .hyperopt
 logfile.txt
 hyperopt_trials.pickle
-user_data/
+user_data/data
 freqtrade-plot.html
 freqtrade-profit-plot.html
 
