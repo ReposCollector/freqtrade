@@ -6,6 +6,9 @@ from pandas import DataFrame
 
 # Add your lib to import here
 import talib.abstract as ta
+from talib.test_data import series, assert_np_arrays_equal, assert_np_arrays_not_equal
+import numpy as np
+from nose.tools import assert_equals, assert_true, assert_raises
 import freqtrade.vendor.qtpylib.indicators as qtpylib
 import numpy  # noqa
 
@@ -166,7 +169,7 @@ class TestStrategy(IStrategy):
         dataframe['bb_middleband'] = bollinger['mid']
         dataframe['bb_upperband'] = bollinger['upper']
 
-        """
+
         # EMA - Exponential Moving Average
         dataframe['ema3'] = ta.EMA(dataframe, timeperiod=3)
         dataframe['ema5'] = ta.EMA(dataframe, timeperiod=5)
@@ -179,7 +182,7 @@ class TestStrategy(IStrategy):
 
         # SMA - Simple Moving Average
         dataframe['sma'] = ta.SMA(dataframe, timeperiod=40)
-        """
+
 
         # TEMA - Triple Exponential Moving Average
         dataframe['tema'] = ta.TEMA(dataframe, timeperiod=9)

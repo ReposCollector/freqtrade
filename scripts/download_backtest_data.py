@@ -28,8 +28,8 @@ arguments.download_data_options()
 # in the command line options explicitely
 args = arguments.parse_args(no_default_config=True)
 
-# Use bittrex as default exchange
-exchange_name = args.exchange or 'bittrex'
+# Use binance as default exchange
+exchange_name = args.exchange or 'binance'
 
 pairs: List = []
 
@@ -54,7 +54,7 @@ if args.config:
     if config.get('ticker_interval'):
         timeframes = args.timeframes or [config.get('ticker_interval')]
     else:
-        timeframes = args.timeframes or ['1m', '5m', '15m', '1h', '4h', '6h', '12h']
+        timeframes = args.timeframes or ['1m', '5m', '15m', '1h']
 
 else:
     config = {
@@ -71,7 +71,7 @@ else:
             }
         }
     }
-    timeframes = args.timeframes or ['1m', '5m']
+    timeframes = args.timeframes or ['1m', '5m', '15m', '1h']
 
 configuration._load_logging_config(config)
 

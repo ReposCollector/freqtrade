@@ -1,14 +1,14 @@
 {
-    "max_open_trades": 3,
-    "stake_currency": "BTC",
-    "stake_amount": 0.05,
+    "max_open_trades": 1000,
+    "stake_currency": "USDT",
+    "stake_amount": 100,
     "fiat_display_currency": "USD",
-    "ticker_interval" : "5m",
+    "amount_reserve_percent": 0.2,
     "dry_run": true,
     "trailing_stop": false,
     "unfilledtimeout": {
         "buy": 10,
-        "sell": 30
+        "sell": 10
     },
     "bid_strategy": {
         "use_order_book": false,
@@ -33,17 +33,20 @@
             "enableRateLimit": true,
             "rateLimit": 200
         },
-        "pair_whitelist": [
+        "pair_fulllist": [
+            "BTC/USDT",
             "BNB/USDT",
             "ETC/USDT",
             "ETH/USDT",
             "EOS/USDT",
             "IOTA/USDT",
             "LTC/USDT",
-            "BTC/USDT",
             "XMR/USDT",
             "XLM/USDT",
             "XRP/USDT"
+        ],
+        "pair_whitelist": [
+            "BTC/USDT"
         ],
         "pair_blacklist": [
         ]

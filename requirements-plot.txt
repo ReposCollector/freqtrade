@@ -2,4 +2,4 @@
 -r requirements.txt
 
 plotly==3.10.0
-
+matplotlib

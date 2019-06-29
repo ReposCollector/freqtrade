@@ -94,6 +94,9 @@ class Strategy001(IStrategy):
         :param dataframe: DataFrame
         :return: DataFrame with buy column
         """
+
+        # crossed_above(series1, series2) == pd.Series((series1 > series2) & (series1.shift(1) <= series2.shift(1)))
+
         dataframe.loc[
             (
                 qtpylib.crossed_above(dataframe['ema20'], dataframe['ema50']) &
