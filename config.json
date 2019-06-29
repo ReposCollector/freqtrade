@@ -52,7 +52,7 @@
         ]
     },
     "experimental": {
-        "use_sell_signal": false,
+        "use_sell_signal": true,
         "sell_profit_only": false,
         "ignore_roi_if_buy_signal": false
     },

@@ -51,13 +51,13 @@ class SykoStrategy(IStrategy):
     # }
 
     minimal_roi = {
-        "1440": 0.0,
-        "0": 0.2
+        "1455": -1.00,
+        "0": 0.3
     }
 
     # Optimal stoploss designed for the strategy
     # This attribute will be overridden if the config file contains "stoploss"
-    stoploss = -0.10 # -2%
+    stoploss = -0.04 # -2%
 
     # trailing stoploss
     trailing_stop = False
@@ -65,7 +65,7 @@ class SykoStrategy(IStrategy):
     # trailing_stop_positive_offset = 0.0  # Disabled / not configured
 
     # Optimal ticker interval for the strategy
-    ticker_interval = '5m'
+    ticker_interval = '1h'
     #tick_in_seconds = 60 * 5
 
     # run "populate_indicators" only for new candle
@@ -90,12 +90,23 @@ class SykoStrategy(IStrategy):
         'sell': 'gtc'
     }
 
+
+    def initialize_portfolio(self, config, pairs):
+        self.config = config
+        self.portfolio = dict()
+
+        for pair in pairs:
+            self.portfolio[pair] = dict()
+            self.portfolio[pair]['USDT'] = int(self.config.get('stake_amount'))
+            self.portfolio[pair][pair.split("/")[0]] = 0
+
+
     def hours_to_ticks(self, hours):
-        tick_in_seconds = 60 * 5
+        tick_in_seconds = 60 * 60
         return int(hours * 3600 / tick_in_seconds)
 
     def days_to_ticks(self, days):
-        tick_in_seconds = 60 * 5
+        tick_in_seconds = 60 * 60
         return int(days * 24 * 3600 / tick_in_seconds)
 
     def informative_pairs(self):
@@ -123,7 +134,7 @@ class SykoStrategy(IStrategy):
         :return: a Dataframe with all mandatory indicators for the strategies
         """
 
-        # Indicatos
+        # Indicators
         # Range: (High - Low) during the last 24 hours
         # Larry_k: Average Noise Ratio during the last 20 days
         # Buy_Target: Target = Today Open + Range * Laary_k
@@ -135,11 +146,9 @@ class SykoStrategy(IStrategy):
         dataframe['candle_noise'] = 1 - abs(dataframe.open - dataframe.close) / (abs(dataframe.high - dataframe.low) + 0.0000001)
         dataframe['larry_k'] = talib.MA(dataframe['candle_noise'], timeperiod = self.days_to_ticks(20))
 
-        a = dataframe.high.shift(self.days_to_ticks(1))
-        b = dataframe.low.shift(self.days_to_ticks(1))
-
-        #dataframe['buy_target'] = dataframe.close.shift(1) + 0.5 * dataframe['donchian_range']
+        #dataframe['buy_target'] = dataframe.close.shift(self.days_to_ticks(1)) + 0.5 * dataframe['donchian_range']
         dataframe['buy_target'] = dataframe.close.shift(self.days_to_ticks(1)) + dataframe['larry_k'] * dataframe['donchian_range']
+        #dataframe['buy_target'] = dataframe.open.shift(self.days_to_ticks(1)-1) + dataframe['larry_k'] * dataframe['donchian_range']
 
         #dataframe['buy_target'].plot()
         #plt.show()
@@ -147,11 +156,12 @@ class SykoStrategy(IStrategy):
         #dataframe['open'].plot()
         #plt.show()
 
-        filtered_df = dataframe[['date', 'close', 'open', 'high', 'low', 'donchian_range', 'larry_k', 'buy_target']]
-        buys = dataframe[dataframe.buy_target <= dataframe.open][['date', 'close', 'donchian_range', 'open', 'buy_target', 'high', 'low']]
+        #filtered_df = dataframe[['date', 'close', 'open', 'high', 'low', 'donchian_range', 'larry_k', 'buy_target']]
+        #buys = dataframe[dataframe.buy_target <= dataframe.open][['date', 'close', 'donchian_range', 'open', 'buy_target', 'high', 'low']]
         #print(buys)
         #print(filtered_df)
-        filtered_df
+        #filtered_df
+
         # Moving Average
         # EMA - Exponential Moving Average
         #dataframe['ema3'] = ta.EMA(dataframe, timeperiod=3)
@@ -186,6 +196,35 @@ class SykoStrategy(IStrategy):
 
         return dataframe
 
+    def update_portfolio(self, type, metadata: dict):
+        pair = metadata['pair']
+        target_coin = pair.split("/")[0]
+        base_currency = pair.split("/")[1]
+
+        if type is 'buy':
+            self.portfolio[pair][target_coin] += metadata['target_coin_quantity']
+            self.portfolio[pair][base_currency] -= metadata['base_currency_quantity']
+        else:
+            self.portfolio[pair][target_coin] -= metadata['target_coin_quantity']
+            self.portfolio[pair][base_currency] += metadata['base_currency_quantity']
+
+
+    def make_buy_order(self, dataframe: DataFrame, metadata: dict):
+        """
+        :param dataframe:
+        :param metadata:
+        :return:
+        """
+        return None
+
+    def make_sell_order(self, dataframe: DataFrame, metadata: dict):
+        """
+        :param dataframe:
+        :param metadata:
+        :return:
+        """
+        return None
+
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
         Based on TA indicators, populates the buy signal for the given dataframe
@@ -212,10 +251,8 @@ class SykoStrategy(IStrategy):
         """
         # dataframe.loc[
         #     (
-        #         (dataframe['adx'] > 70) &
-        #         (dataframe['tema'] > dataframe['bb_middleband']) &
-        #         (dataframe['tema'] < dataframe['tema'].shift(1)) &
-        #         (dataframe['volume'] > 0)  # Make sure Volume is not 0
+        #         (dataframe['volume'] >= 0) &
+        #         (dataframe['buy'] == 0)
         #     ),
         #     'sell'] = 1
         return dataframe

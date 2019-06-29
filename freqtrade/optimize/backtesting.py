@@ -229,6 +229,71 @@ class Backtesting(object):
             ticker[pair] = [x for x in ticker_data.itertuples()]
         return ticker
 
+    def _make_buy_order(self, processed, pair, index):
+        logger.info("_make_buy_order")
+
+        metadata = dict()
+        metadata['pair'] = pair
+        metadata['index'] = index
+
+        new_orders = self.strategy.make_buy_order(processed, metadata)
+        if new_orders is not None:
+            self.pending_orders['buy'].extend(new_orders)
+            return True
+        return False
+
+    def _make_sell_order(self, processed, pair, index):
+        logger.info("_make_sell_order")
+
+        metadata = dict()
+        metadata['pair'] = pair
+        metadata['index'] = index
+
+        new_orders = self.strategy.make_sell_order(processed, metadata)
+        if new_orders is not None:
+            self.pending_orders['sell'].extend(new_orders)
+            return True
+        return False
+
+    def _process_pending_buy_orders(self, pair, index, row):
+        logger.info("_process_pending_buy_orders")
+
+        metadata = dict()
+        metadata['pair'] = pair
+        metadata['index'] = index
+
+        tmp_list = []
+        for order in self.pending_orders['buy'][pair]:
+            if order.price >= row.low:
+                metadata['base_currency_quantity'] = order.base_currency_quantity
+                metadata['target_coin_quantity'] = order.target_coin_quantity
+                self.strategy.update_portfolio('buy', metadata)
+            else:
+                tmp_list.append(order)
+
+        if len(tmp_list) != len(self.pending_orders['buy'][pair]):
+            self.pending_orders['buy'][pair] = tmp_list
+
+
+    def _process_pending_sell_orders(self, pair, index, row):
+        logger.info("_process_pending_sell_orders")
+
+        metadata = dict()
+        metadata['pair'] = pair
+        metadata['index'] = index
+
+        tmp_list = []
+        for order in self.pending_orders['sell'][pair]:
+            if order.price <= row.high:
+                metadata['base_currency_quantity'] = order.base_currency_quantity
+                metadata['target_coin_quantity'] = order.target_coin_quantity
+                self.strategy.update_portfolio('sell', metadata)
+            else:
+                tmp_list.append(order)
+
+        if len(tmp_list) != len(self.pending_orders['sell'][pair]):
+            self.pending_orders['sell'][pair] = tmp_list
+
     def _get_sell_trade_entry(
             self, pair: str, buy_row: DataFrame,
             partial_ticker: List, trade_count_lock: Dict,
@@ -266,8 +331,11 @@ class Backtesting(object):
                     roi = self.strategy.minimal_roi[roi_entry]
 
                     # - (Expected abs profit + open_rate + open_fee) / (fee_close -1)
-                    closerate = - (trade.open_rate * roi + trade.open_rate *
-                                   (1 + trade.fee_open)) / (trade.fee_close - 1)
+                    if roi > 0:
+                        closerate = - (trade.open_rate * roi + trade.open_rate *
+                                       (1 + trade.fee_open)) / (trade.fee_close - 1)
+                    else:
+                        closerate = sell_row.open
                 else:
                     closerate = sell_row.open
 
@@ -306,6 +374,72 @@ class Backtesting(object):
             return btr
         return None
 
+    def backtest_syko(self, args: Dict) -> DataFrame:
+        processed = args['processed']
+        stake_amount = args['stake_amount']
+        max_open_trades = args.get('max_open_trades', 0)
+        position_stacking = args.get('position_stacking', False)
+        timeframe_partitioning = args.get('timeframe_partitioning', False)
+
+        start_date = args['start_date']
+        end_date = args['end_date']
+        trades = []
+        trade_count_lock: Dict = {}
+
+        # Dict of ticker-lists for performance (looping lists is a lot faster than dataframes)
+        ticker: Dict = self._get_ticker_list(processed)
+
+        lock_pair_until: Dict = {}
+        # Indexes per pair, so some pairs are allowed to have a missing start.
+        indexes: Dict = {}
+        tmp = start_date + timedelta(minutes=self.ticker_interval_mins)
+
+        self.pending_orders = dict()
+        self.pending_orders['buy'] = dict()
+        self.pending_orders['sell'] = dict()
+        for pair in ticker.keys():
+            self.pending_orders['buy'][pair] = []
+            self.pending_orders['sell'][pair] = []
+
+        self.strategy.initialize_portfolio(self.config, ticker.keys())
+
+        while tmp < end_date:
+            for i, pair in enumerate(ticker):
+                if pair not in indexes:
+                    indexes[pair] = 0
+
+                try:
+                    row = ticker[pair][indexes[pair]]
+                except IndexError:
+                    continue
+
+                # Waits until the time-counter reaches the start of the data for this pair.
+                if row.date > tmp.datetime:
+                    continue
+
+                sell_order_made = False
+                if row.sell == 1:
+                    sell_order_made = self._make_sell_order(processed, pair, indexes[pair])
+
+                if sell_order_made is False and row.buy == 1:
+                    self._make_buy_order(processed, pair, indexes[pair])
+
+                # Process Pending Sell Orders
+                self._process_pending_sell_orders(pair, indexes[pair], row)
+
+                # Process Pending Buy Orders
+                self._process_pending_buy_orders(pair, indexes[pair], row)
+
+
+                indexes[pair] += 1
+
+                # Move time one configured time_interval ahead.
+            tmp += timedelta(minutes=self.ticker_interval_mins)
+
+        return DataFrame.from_records(trades, columns=BacktestResult._fields)
+
+
+
     def backtest(self, args: Dict) -> DataFrame:
         """
         Implements backtesting functionality
@@ -325,6 +459,8 @@ class Backtesting(object):
         stake_amount = args['stake_amount']
         max_open_trades = args.get('max_open_trades', 0)
         position_stacking = args.get('position_stacking', False)
+        timeframe_partitioning = args.get('timeframe_partitioning', False)
+
         start_date = args['start_date']
         end_date = args['end_date']
         trades = []
@@ -358,8 +494,10 @@ class Backtesting(object):
 
                 indexes[pair] += 1
 
-                if row.buy == 0 or row.sell == 1:
+                if row.buy == 0 or (row.buy == 1 and row.sell == 1):
                     continue  # skip rows where no buy signal or that would immediately sell off
+
+                # Make trades only when row.buy == 1 and row.sell = 0
 
                 if (not position_stacking and pair in lock_pair_until
                         and row.date <= lock_pair_until[pair]):
@@ -392,6 +530,7 @@ class Backtesting(object):
         Run a backtesting end-to-end
         :return: None
         """
+        logger.info('Starting Backtesting........')
         data: Dict[str, Any] = {}
         pairs = self.config['exchange']['pair_whitelist']
         logger.info('Using stake_currency: %s ...', self.config['stake_currency'])
@@ -437,6 +576,7 @@ class Backtesting(object):
             preprocessed = self.strategy.tickerdata_to_dataframe(data)
 
             # Execute backtest and print results
+
             all_results[self.strategy.get_strategy_name()] = self.backtest(
                 {
                     'stake_amount': self.config.get('stake_amount'),
@@ -447,6 +587,17 @@ class Backtesting(object):
                     'end_date': max_date,
                 }
             )
+
+            # all_results[self.strategy.get_strategy_name()] = self.backtest_syko(
+            #     {
+            #         'stake_amount': self.config.get('stake_amount'),
+            #         'processed': preprocessed,
+            #         'max_open_trades': max_open_trades,
+            #         'position_stacking': self.config.get('position_stacking', False),
+            #         'start_date': min_date,
+            #         'end_date': max_date,
+            #     }
+            # )
 
         for strategy, results in all_results.items():
 

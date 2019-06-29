@@ -109,6 +109,15 @@ class IStrategy(ABC):
         self._last_candle_seen_per_pair: Dict[str, datetime] = {}
 
     @abstractmethod
+    def make_sell_order(self, dataframe: DataFrame, metadata: dict):
+        """
+        haha
+        :param dataframe:
+        :param metadata:
+        :return:
+        """
+
+    @abstractmethod
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
         Populate indicators that will be used in the Buy and Sell strategy
