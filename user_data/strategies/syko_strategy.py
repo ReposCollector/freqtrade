@@ -66,7 +66,7 @@ class SykoStrategy(IStrategy):
     # trailing_stop_positive_offset = 0.0  # Disabled / not configured
 
     # Optimal ticker interval for the strategy
-    ticker_interval = '1h'
+    ticker_interval = '15m'
     #tick_in_seconds = 60 * 5
 
     # run "populate_indicators" only for new candle
@@ -108,11 +108,11 @@ class SykoStrategy(IStrategy):
 
 
     def hours_to_ticks(self, hours):
-        tick_in_seconds = 60 * 60
+        tick_in_seconds = 60 * 15
         return int(hours * 3600 / tick_in_seconds)
 
     def days_to_ticks(self, days):
-        tick_in_seconds = 60 * 60
+        tick_in_seconds = 60 * 15
         return int(days * 24 * 3600 / tick_in_seconds)
 
     def informative_pairs(self):
@@ -220,13 +220,18 @@ class SykoStrategy(IStrategy):
         index = metadata['index']
 
         order = OrderItem()
-        order.price = dataframe[pair].open[index]
-        order.quantity = 0.001
-        order.quantity_in_base_currency = order.price * order.quantity
-        order.stoploss_percent = 0.03
+        order.buy_price = dataframe[pair].open[index]
+        order.buy_quantity_in_base_currency = 5
 
-        if order.quantity_in_base_currency <= self.free_budget[pair][0]:
-            self.free_budget[pair][0] -= order.quantity_in_base_currency
+        order.buy_quantity = order.buy_quantity_in_base_currency / order.buy_price
+        order.stoploss_percent = 0.04
+        order.buy_index = index
+
+        order.sell_price = -1 # Target
+        order.timeout_seconds = 24 * 60 * 60 + 10 * 60 # Timeout 1 day in seconds
+
+        if order.calc_buy_net() <= self.free_budget[pair][0]:
+            self.free_budget[pair][0] -= order.buy_quantity_in_base_currency
             return [order]
         else:
             return []
@@ -256,8 +261,8 @@ class SykoStrategy(IStrategy):
         dataframe.loc[
             (
                     (dataframe['volume'] > 0)
-         #           & (dataframe['larry_k'].notna())
-         #           & (dataframe['buy_target'] <= dataframe['open'])
+                    & (dataframe['larry_k'].notna())
+                    & (dataframe['buy_target'] <= dataframe['open'])
             ),
             'buy'] = 1
 

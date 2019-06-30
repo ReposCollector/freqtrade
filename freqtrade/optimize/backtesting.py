@@ -22,10 +22,106 @@ from freqtrade.resolvers import ExchangeResolver, StrategyResolver
 from freqtrade.state import RunMode
 from freqtrade.strategy.interface import IStrategy, SellType
 
+import time
+import datetime as dt
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from multiprocessing import Process
+
 from freqtrade.order_item import OrderItem
 
 logger = logging.getLogger(__name__)
 
+def runGraph():
+    # Parameters
+    print('show')
+    x_len = 200         # Number of points to display
+    y_range = [10, 40]  # Range of possible Y values to display
+
+    # Create figure for plotting
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1)
+    xs = list(range(0, 200))
+    ys = [0] * x_len
+    ax.set_ylim(y_range)
+
+    # Create a blank line. We will update the line in animate
+    line, = ax.plot(xs, ys)
+
+    # Add labels
+    plt.title('TMP102 Temperature over Time')
+    plt.xlabel('Samples')
+    plt.ylabel('Temperature (deg C)')
+
+    # This function is called periodically from FuncAnimation
+    def animate(i, ys):
+
+        # Read temperature (Celsius) from TMP102
+        temp_c = np.random.random(1)*40
+
+        # Add y to list
+        ys.append(temp_c)
+
+        # Limit y list to set number of items
+        ys = ys[-x_len:]
+
+        # Update line with new Y values
+        line.set_ydata(ys)
+
+        return line,
+
+
+    # Set up plot to call animate() function periodically
+
+    ani = animation.FuncAnimation(fig,
+        animate,
+        fargs=(ys,),
+        interval=50,
+        blit=True)
+    plt.show()
+def animate(i, portfolio_size, xs, ys, ax):
+    print("hi")
+
+    if len(portfolio_size) == 0:
+        return
+
+    if len(portfolio_size) == 1:
+        new_key = sorted(portfolio_size.keys())[0]
+    else:
+        new_key = sorted(portfolio_size.keys())[-1]
+
+    new_val = portfolio_size[new_key]
+
+    # Add x and y to lists
+    xs.append(new_key)
+    ys.append(new_val)
+
+    ax.clear()
+    ax.plot(xs, ys)
+    #
+    # # Format plot
+    # plt.xticks(rotation=45, ha='right')
+    # plt.subplots_adjust(bottom=0.30)
+    # plt.title('')
+    # plt.ylabel('')
+
+def runPortfolioGraphDrawing(portfolio_size):
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1)
+    xs = []
+    ys = []
+
+    for key in sorted(portfolio_size.keys()):
+        val = portfolio_size[key]
+        xs.append(key)
+        ys.append(val)
+
+    ax.clear()
+    ax.plot(xs, ys)
+
+    # Set up plot to call animate() function periodically
+    #ani = animation.FuncAnimation(fig, animate, fargs=(portfolio_size, xs, ys, ax,), interval=1000, blit=True)
+    plt.show()
 
 class BacktestResult(NamedTuple):
     """
@@ -266,19 +362,20 @@ class Backtesting(object):
 
         tmp_list = []
         for order in self.pending_orders['buy'][pair]:
-            if order.price >= row.low:
-                metadata['target_coin_quantity'] = order.quantity
-                metadata['base_currency_quantity'] = order.quantity_in_base_currency
+            if order.buy_price >= row.low:
+                metadata['target_coin_quantity'] = order.buy_quantity
+                metadata['base_currency_quantity'] = order.calc_buy_net()
                 self.strategy.update_portfolio('buy', metadata)
-                order.date_processed = row.date
-                if order.stoploss_percent > 0:
-                    self.pending_orders['stoploss'][pair].append(order)
+
+                order.buy_processed_date = row.date
+
+                if order.has_sell_plan():
+                    self.pending_orders['sell'][pair].append(order)
             else:
                 tmp_list.append(order)
 
         if len(tmp_list) != len(self.pending_orders['buy'][pair]):
             self.pending_orders['buy'][pair] = tmp_list
-
 
     def _process_pending_sell_orders(self, pair, index, row):
         #logger.info("_process_pending_sell_orders")
@@ -287,18 +384,45 @@ class Backtesting(object):
         metadata['pair'] = pair
         metadata['index'] = index
 
-        tmp_list = []
+        remove_index = []
+        idx = 0
+        trade_list = []
         for order in self.pending_orders['sell'][pair]:
-            #sell = self.strategy.should_sell_syko(row, order)
-            if order.price <= row.high:
-                metadata['target_coin_quantity'] = order.quantity
-                metadata['base_currency_quantity'] = order.quantity_in_base_currency
-                self.strategy.update_portfolio('sell', metadata)
-            else:
-                tmp_list.append(order)
+            sell_type = order.has_to_sell(row)
 
-        if len(tmp_list) != len(self.pending_orders['sell'][pair]):
-            self.pending_orders['sell'][pair] = tmp_list
+            if sell_type is not SellType.NONE:
+                metadata['target_coin_quantity'] = order.buy_quantity
+                metadata['base_currency_quantity'] = order.calc_sell_net()
+                self.strategy.update_portfolio('sell', metadata)
+                remove_index.append(idx)
+
+                profit_percent = order.calc_profit_percent()
+                profit_abs = order.calc_profit()
+
+                trade_entry =  BacktestResult(pair=pair,
+                               profit_percent=profit_percent,
+                               profit_abs=profit_abs,
+                               open_time=order.buy_processed_date,
+                               close_time=row.date,
+                               trade_duration=(row.date - order.buy_processed_date).total_seconds() / 60,
+                               open_index=order.buy_index,
+                               close_index=index,
+                               open_at_end=False,
+                               open_rate=order.buy_price,
+                               close_rate=order.sell_price,
+                               sell_reason=sell_type
+                               )
+                trade_list.append(trade_entry)
+
+                #logger.info("[{}] Sell {} {} ({}% profit) (bought: {}, sold: {})".
+                #    format(sell_type, str(order.buy_quantity), pair,
+                #           str(round(100 * (order.sell_price - order.buy_price) / order.buy_price, 3)), order.buy_processed_date, row.date))
+            idx += 1
+
+        for idx in sorted(remove_index, reverse=True):
+            del self.pending_orders['sell'][pair][idx]
+
+        return trade_list
 
 
     def _process_stoploss(self, pair, index, row):
@@ -486,16 +610,20 @@ class Backtesting(object):
             self.pending_orders['stoploss'][pair] = []
 
         self.strategy.initialize_portfolio(self.config, ticker.keys())
+        self.portfolio_size = dict()
 
         while tmp < end_date:
+            pf_size = 0
             for i, pair in enumerate(ticker):
                 if pair not in indexes:
                     indexes[pair] = 0
-
                 try:
                     row = ticker[pair][indexes[pair]]
                 except IndexError:
                     continue
+
+                pf_size += self.strategy.portfolio[pair][0]
+                pf_size += self.strategy.portfolio[pair][1] * row.open
 
                 # Waits until the time-counter reaches the start of the data for this pair.
                 if row.date > tmp.datetime:
@@ -509,19 +637,24 @@ class Backtesting(object):
                     self._make_buy_order(processed, pair, indexes[pair])
 
                 # Process Stop Loss
-                self._process_stoploss(pair, indexes[pair], row)
-
-                # Process Pending Sell Orders
-                self._process_pending_sell_orders(pair, indexes[pair], row)
+                #self._process_stoploss(pair, indexes[pair], row)
 
                 # Process Pending Buy Orders
                 self._process_pending_buy_orders(pair, indexes[pair], row)
 
+                # Process Pending Sell Orders
+                trade_entries = self._process_pending_sell_orders(pair, indexes[pair], row)
+
+                trades.extend(trade_entries)
                 indexes[pair] += 1
 
-                # Move time one configured time_interval ahead.
+            # Calculate the total size of portfolio
+            self.portfolio_size[tmp.timestamp - start_date.timestamp] = pf_size
+
+            # Move time one configured time_interval ahead.
             tmp += timedelta(minutes=self.ticker_interval_mins)
 
+        #runPortfolioGraphDrawing(self.portfolio_size)
         return DataFrame.from_records(trades, columns=BacktestResult._fields)
 
 

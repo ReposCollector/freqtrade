@@ -5,8 +5,6 @@ This module defines the interface to apply for strategies
 import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
-from enum import Enum
-from typing import Dict, List, NamedTuple, Tuple
 import warnings
 
 import arrow
@@ -16,38 +14,9 @@ from freqtrade.data.dataprovider import DataProvider
 from freqtrade.exchange import timeframe_to_minutes
 from freqtrade.persistence import Trade
 from freqtrade.wallets import Wallets
-from freqtrade.order_item import OrderItem
+from freqtrade.order_item import *
 
 logger = logging.getLogger(__name__)
-
-
-class SignalType(Enum):
-    """
-    Enum to distinguish between buy and sell signals
-    """
-    BUY = "buy"
-    SELL = "sell"
-
-
-class SellType(Enum):
-    """
-    Enum to distinguish between sell reasons
-    """
-    ROI = "roi"
-    STOP_LOSS = "stop_loss"
-    STOPLOSS_ON_EXCHANGE = "stoploss_on_exchange"
-    TRAILING_STOP_LOSS = "trailing_stop_loss"
-    SELL_SIGNAL = "sell_signal"
-    FORCE_SELL = "force_sell"
-    NONE = ""
-
-
-class SellCheckTuple(NamedTuple):
-    """
-    NamedTuple for Sell type + reason
-    """
-    sell_flag: bool
-    sell_type: SellType
 
 
 class IStrategy(ABC):
