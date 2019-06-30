@@ -255,7 +255,7 @@ def download_pair_history(datadir: Optional[Path],
         new_data = exchange.get_history(pair=pair, ticker_interval=ticker_interval,
                                         since_ms=since_ms if since_ms
                                         else
-                                        int(arrow.utcnow().shift(days=-30).float_timestamp) * 1000)
+                                        int(arrow.utcnow().shift(days=-3*365).float_timestamp) * 1000)
         data.extend(new_data)
 
         logger.debug("New Start: %s", misc.format_ms_time(data[0][0]))

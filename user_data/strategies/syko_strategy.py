@@ -2,6 +2,7 @@
 # --- Do not remove these libs ---
 from freqtrade.strategy.interface import IStrategy
 from pandas import DataFrame
+from freqtrade.order_item import OrderItem
 # --------------------------------
 
 # Add your lib to import here
@@ -94,11 +95,16 @@ class SykoStrategy(IStrategy):
     def initialize_portfolio(self, config, pairs):
         self.config = config
         self.portfolio = dict()
+        self.free_budget = dict()
 
+        # 0: base_currency, 1: target_currency
         for pair in pairs:
             self.portfolio[pair] = dict()
-            self.portfolio[pair]['USDT'] = int(self.config.get('stake_amount'))
-            self.portfolio[pair][pair.split("/")[0]] = 0
+            self.portfolio[pair][0] = int(self.config.get('stake_amount'))
+            self.portfolio[pair][1] = 0
+            self.free_budget[pair] = dict()
+            self.free_budget[pair][0] = self.portfolio[pair][0]
+            self.free_budget[pair][1] = 0
 
 
     def hours_to_ticks(self, hours):
@@ -198,32 +204,47 @@ class SykoStrategy(IStrategy):
 
     def update_portfolio(self, type, metadata: dict):
         pair = metadata['pair']
-        target_coin = pair.split("/")[0]
-        base_currency = pair.split("/")[1]
 
         if type is 'buy':
-            self.portfolio[pair][target_coin] += metadata['target_coin_quantity']
-            self.portfolio[pair][base_currency] -= metadata['base_currency_quantity']
+            self.portfolio[pair][0] -= metadata['base_currency_quantity']
+            self.portfolio[pair][1] += metadata['target_coin_quantity']
+            self.free_budget[pair][1] += metadata['target_coin_quantity']
         else:
-            self.portfolio[pair][target_coin] -= metadata['target_coin_quantity']
-            self.portfolio[pair][base_currency] += metadata['base_currency_quantity']
+            self.portfolio[pair][0] += metadata['base_currency_quantity']
+            self.portfolio[pair][1] -= metadata['target_coin_quantity']
+            self.free_budget[pair][0] += metadata['base_currency_quantity']
 
 
     def make_buy_order(self, dataframe: DataFrame, metadata: dict):
-        """
-        :param dataframe:
-        :param metadata:
-        :return:
-        """
-        return None
+        pair = metadata['pair']
+        index = metadata['index']
+
+        order = OrderItem()
+        order.price = dataframe[pair].open[index]
+        order.quantity = 0.001
+        order.quantity_in_base_currency = order.price * order.quantity
+        order.stoploss_percent = 0.03
+
+        if order.quantity_in_base_currency <= self.free_budget[pair][0]:
+            self.free_budget[pair][0] -= order.quantity_in_base_currency
+            return [order]
+        else:
+            return []
 
     def make_sell_order(self, dataframe: DataFrame, metadata: dict):
-        """
-        :param dataframe:
-        :param metadata:
-        :return:
-        """
-        return None
+        pair = metadata['pair']
+        index = metadata['index']
+
+        order = OrderItem()
+        order.price = dataframe[pair].open[index]
+        order.quantity = 0.001
+        order.quantity_in_base_currency = order.price * order.quantity
+
+        if order.quantity <= self.free_budget[pair][1]:
+            self.free_budget[pair][1] -= order.quantity
+            return [order]
+        else:
+            return []
 
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
@@ -235,8 +256,8 @@ class SykoStrategy(IStrategy):
         dataframe.loc[
             (
                     (dataframe['volume'] > 0)
-                    & (dataframe['larry_k'].notna())
-                    & (dataframe['buy_target'] <= dataframe['open'])
+         #           & (dataframe['larry_k'].notna())
+         #           & (dataframe['buy_target'] <= dataframe['open'])
             ),
             'buy'] = 1
 
@@ -249,10 +270,10 @@ class SykoStrategy(IStrategy):
         :param metadata: Additional information, like the currently traded pair
         :return: DataFrame with buy column
         """
-        # dataframe.loc[
-        #     (
-        #         (dataframe['volume'] >= 0) &
-        #         (dataframe['buy'] == 0)
-        #     ),
-        #     'sell'] = 1
+        dataframe.loc[
+            (
+                (dataframe['volume'] >= 0)
+            #    & (dataframe['buy'] == 0)
+            ),
+            'sell'] = 1
         return dataframe

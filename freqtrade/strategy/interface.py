@@ -16,7 +16,7 @@ from freqtrade.data.dataprovider import DataProvider
 from freqtrade.exchange import timeframe_to_minutes
 from freqtrade.persistence import Trade
 from freqtrade.wallets import Wallets
-
+from freqtrade.order_item import OrderItem
 
 logger = logging.getLogger(__name__)
 
@@ -250,6 +250,19 @@ class IStrategy(ABC):
             str(sell)
         )
         return buy, sell
+
+    def should_sell_syko(self, row: DataFrame, order: OrderItem) -> SellCheckTuple:
+        stoploss_enabled = True
+
+        if order.price <= row.high:
+            sold_price = order.price
+            quantity_changes = -order.quantity_in_base_currency
+            quantity_changes_in_base_currency = order.quantity_in_base_currency * (1 - 0.005) # TODO - fee
+        else:
+            if stoploss_enabled:
+                stoploss_price = 1
+
+
 
     def should_sell(self, trade: Trade, rate: float, date: datetime, buy: bool,
                     sell: bool, low: float = None, high: float = None,

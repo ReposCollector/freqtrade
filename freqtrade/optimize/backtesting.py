@@ -22,6 +22,8 @@ from freqtrade.resolvers import ExchangeResolver, StrategyResolver
 from freqtrade.state import RunMode
 from freqtrade.strategy.interface import IStrategy, SellType
 
+from freqtrade.order_item import OrderItem
+
 logger = logging.getLogger(__name__)
 
 
@@ -230,33 +232,33 @@ class Backtesting(object):
         return ticker
 
     def _make_buy_order(self, processed, pair, index):
-        logger.info("_make_buy_order")
+        #logger.info("_make_buy_order")
 
         metadata = dict()
         metadata['pair'] = pair
         metadata['index'] = index
 
         new_orders = self.strategy.make_buy_order(processed, metadata)
-        if new_orders is not None:
-            self.pending_orders['buy'].extend(new_orders)
+        if new_orders:
+            self.pending_orders['buy'][pair].extend(new_orders)
             return True
         return False
 
     def _make_sell_order(self, processed, pair, index):
-        logger.info("_make_sell_order")
+        #logger.info("_make_sell_order")
 
         metadata = dict()
         metadata['pair'] = pair
         metadata['index'] = index
 
         new_orders = self.strategy.make_sell_order(processed, metadata)
-        if new_orders is not None:
-            self.pending_orders['sell'].extend(new_orders)
+        if new_orders:
+            self.pending_orders['sell'][pair].extend(new_orders)
             return True
         return False
 
     def _process_pending_buy_orders(self, pair, index, row):
-        logger.info("_process_pending_buy_orders")
+        #logger.info("_process_pending_buy_orders")
 
         metadata = dict()
         metadata['pair'] = pair
@@ -265,9 +267,12 @@ class Backtesting(object):
         tmp_list = []
         for order in self.pending_orders['buy'][pair]:
             if order.price >= row.low:
-                metadata['base_currency_quantity'] = order.base_currency_quantity
-                metadata['target_coin_quantity'] = order.target_coin_quantity
+                metadata['target_coin_quantity'] = order.quantity
+                metadata['base_currency_quantity'] = order.quantity_in_base_currency
                 self.strategy.update_portfolio('buy', metadata)
+                order.date_processed = row.date
+                if order.stoploss_percent > 0:
+                    self.pending_orders['stoploss'][pair].append(order)
             else:
                 tmp_list.append(order)
 
@@ -276,7 +281,7 @@ class Backtesting(object):
 
 
     def _process_pending_sell_orders(self, pair, index, row):
-        logger.info("_process_pending_sell_orders")
+        #logger.info("_process_pending_sell_orders")
 
         metadata = dict()
         metadata['pair'] = pair
@@ -284,15 +289,92 @@ class Backtesting(object):
 
         tmp_list = []
         for order in self.pending_orders['sell'][pair]:
+            #sell = self.strategy.should_sell_syko(row, order)
             if order.price <= row.high:
-                metadata['base_currency_quantity'] = order.base_currency_quantity
-                metadata['target_coin_quantity'] = order.target_coin_quantity
+                metadata['target_coin_quantity'] = order.quantity
+                metadata['base_currency_quantity'] = order.quantity_in_base_currency
                 self.strategy.update_portfolio('sell', metadata)
             else:
                 tmp_list.append(order)
 
         if len(tmp_list) != len(self.pending_orders['sell'][pair]):
             self.pending_orders['sell'][pair] = tmp_list
+
+
+    def _process_stoploss(self, pair, index, row):
+        #logger.info("_process_stoploss")
+
+        metadata = dict()
+        metadata['pair'] = pair
+        metadata['index'] = index
+
+        tmp_list = []
+        for order in self.pending_orders['stoploss'][pair]:
+            if order.stoploss_percent == 0:
+                continue
+
+            stoploss_price = order.price * (1 - order.stoploss_percent)
+            if order.date_processed < row.date and stoploss_price >= row.low:
+                if self.strategy.free_budget[pair][1] >= order.quantity:
+                    metadata['target_coin_quantity'] = order.quantity
+                    metadata['base_currency_quantity'] = stoploss_price * metadata['target_coin_quantity']
+                    self.strategy.update_portfolio('sell', metadata)
+                else:
+                    remaining = order.quantity
+
+                    if index == 85:
+                        print("hi0")
+
+                    if self.strategy.free_budget[pair][1] > 0:
+                        remaining -= self.strategy.free_budget[pair][1]
+                        metadata['target_coin_quantity'] = self.strategy.free_budget[pair][1]
+                        metadata['base_currency_quantity'] = stoploss_price * metadata['target_coin_quantity']
+                        self.strategy.update_portfolio('sell', metadata)
+
+                    if remaining > 0:
+                        if len(self.pending_orders['sell'][pair]) > 0:
+                            for idx in range(len(self.pending_orders['sell'][pair])):
+                                if (self.pending_orders['sell'][pair][idx].quantity > 0) is False:
+                                    continue
+                                if remaining > self.pending_orders['sell'][pair][idx].quantity:
+                                    remaining -= self.pending_orders['sell'][pair][idx].quantity
+                                    metadata['target_coin_quantity'] = self.pending_orders['sell'][pair][idx].quantity
+                                    metadata['base_currency_quantity'] = stoploss_price * metadata['target_coin_quantity']
+                                    self.strategy.update_portfolio('sell', metadata)
+                                    self.pending_orders['sell'][pair][idx].quantity = 0
+                                else:
+                                    metadata['target_coin_quantity'] = remaining
+                                    metadata['base_currency_quantity'] = stoploss_price * metadata['target_coin_quantity']
+                                    self.strategy.update_portfolio('sell', metadata)
+                                    self.pending_orders['sell'][pair][idx].quantity -= remaining
+                                    remaining = 0
+
+                                if (remaining > 0) is False:
+                                    break
+                        else:
+                            assert(False)
+
+                    if remaining is not 0:
+                        assert (remaining == 0)
+            else:
+                tmp_list.append(order)
+
+        if len(tmp_list) != len(self.pending_orders['stoploss'][pair]):
+            self.pending_orders['stoploss'][pair] = tmp_list
+
+        total_pending_stoploss_quantity = 0
+        for order in self.pending_orders['stoploss'][pair]:
+            total_pending_stoploss_quantity += order.quantity
+
+        if (total_pending_stoploss_quantity > self.strategy.portfolio[pair][1]):
+            print("?")
+
+
+
+    def _get_sell_trade_entry_syko(
+            self, pair: str, buy_row: DataFrame,
+            max_open_trades: int) -> Optional[BacktestResult]:
+        return None
 
     def _get_sell_trade_entry(
             self, pair: str, buy_row: DataFrame,
@@ -397,9 +479,11 @@ class Backtesting(object):
         self.pending_orders = dict()
         self.pending_orders['buy'] = dict()
         self.pending_orders['sell'] = dict()
+        self.pending_orders['stoploss'] = dict()
         for pair in ticker.keys():
             self.pending_orders['buy'][pair] = []
             self.pending_orders['sell'][pair] = []
+            self.pending_orders['stoploss'][pair] = []
 
         self.strategy.initialize_portfolio(self.config, ticker.keys())
 
@@ -424,12 +508,14 @@ class Backtesting(object):
                 if sell_order_made is False and row.buy == 1:
                     self._make_buy_order(processed, pair, indexes[pair])
 
+                # Process Stop Loss
+                self._process_stoploss(pair, indexes[pair], row)
+
                 # Process Pending Sell Orders
                 self._process_pending_sell_orders(pair, indexes[pair], row)
 
                 # Process Pending Buy Orders
                 self._process_pending_buy_orders(pair, indexes[pair], row)
-
 
                 indexes[pair] += 1
 
@@ -577,27 +663,29 @@ class Backtesting(object):
 
             # Execute backtest and print results
 
-            all_results[self.strategy.get_strategy_name()] = self.backtest(
-                {
-                    'stake_amount': self.config.get('stake_amount'),
-                    'processed': preprocessed,
-                    'max_open_trades': max_open_trades,
-                    'position_stacking': self.config.get('position_stacking', False),
-                    'start_date': min_date,
-                    'end_date': max_date,
-                }
-            )
+            if False:
+                all_results[self.strategy.get_strategy_name()] = self.backtest(
+                    {
+                        'stake_amount': self.config.get('stake_amount'),
+                        'processed': preprocessed,
+                        'max_open_trades': max_open_trades,
+                        'position_stacking': self.config.get('position_stacking', False),
+                        'start_date': min_date,
+                        'end_date': max_date,
+                    }
+                )
 
-            # all_results[self.strategy.get_strategy_name()] = self.backtest_syko(
-            #     {
-            #         'stake_amount': self.config.get('stake_amount'),
-            #         'processed': preprocessed,
-            #         'max_open_trades': max_open_trades,
-            #         'position_stacking': self.config.get('position_stacking', False),
-            #         'start_date': min_date,
-            #         'end_date': max_date,
-            #     }
-            # )
+            if True:
+                all_results[self.strategy.get_strategy_name()] = self.backtest_syko(
+                    {
+                        'stake_amount': self.config.get('stake_amount'),
+                        'processed': preprocessed,
+                        'max_open_trades': max_open_trades,
+                        'position_stacking': self.config.get('position_stacking', False),
+                        'start_date': min_date,
+                        'end_date': max_date,
+                    }
+                )
 
         for strategy, results in all_results.items():
 
